@@ -3,7 +3,7 @@
 class ComprezzEncoder {
 	constructor() {};
 	
-	_buildCount(buff) {
+	_encodeCount(buff) {
 		let dict = [];
 		for(let i = 0; i < 0x100; i++)
 			dict.push(i);
@@ -31,13 +31,13 @@ class ComprezzEncoder {
 			buff[i] = ((num & 0x7f) | 0x80);
 			num >>= 7;
 			
-			if(num <= 0) {
+			if(num === 0) {
 				buff[i] &= 0x7f;
 				break;
 			}
 		};
 		
-		return buff.slice(0, i);
+		return buff.slice(0, i + 1);
 	};
 	
 	_encodeRLE(buff) {
@@ -50,13 +50,13 @@ class ComprezzEncoder {
 		for(; si < buff.length;) {
 			sc0 = buff.readUInt8(si);
 			
-			for(repNo = 0; si < buff.length; si++) {
+			for(repNo = 0; si < buff.length; si++, repNo++) {
 				sc1 = buff.readUInt8(si);
 				if(sc0 !== sc1) break;
 			};
 			
 			ret.writeUInt8(sc0, di); di++;
-			repBuff = this._encodeUInt(repNo);
+			repBuff = this._encodeUInt(repNo - 1);
 			di += repBuff.copy(ret, di);
 		};
 		
@@ -148,7 +148,7 @@ class ComprezzEncoder {
 			if(Buffer.isBuffer(data) !== true)
 				return reject("`encode` expected a Buffer");
 			
-			const count = this._buildCount(data);
+			const count = this._encodeCount(data);
 			
 			// [TODO]
 		});
@@ -158,7 +158,7 @@ class ComprezzEncoder {
 class ComprezzDecoder {
 	constructor() {};
 	
-	_buildInvCount(buff, reject) {
+	_decodeCount(buff, reject) {
 		let dict = [];
 		for(let i = 0; i < 0x100; i++)
 			dict.push(i);
@@ -176,6 +176,66 @@ class ComprezzDecoder {
 		};
 		
 		return ret;
+	};
+	
+	_decodeUInt(buff, buffI, reject) {
+		const no = new Uint32Array([ 0x00000000 ]);
+		
+		let i = 0, c = 0x00;
+		for(; ((buffI + i) < buff.length); i++) {
+			c = buff.readUInt8(buffI + i);
+			
+			no[0] <<= 7;
+			no[0] |= (c & 0x7f);
+			
+			if(c & 0x80) continue;
+			break;
+		};
+		
+		return {
+			bytes: (i + 1),
+			number: no[0],
+		};
+	};
+	
+	_getLengthRLE(buff, reject) {
+		let retBuffLength = 0;
+		
+		for(let buffI = 0, c = 0x00, rep = false; buffI < buff.length;) {
+			c = buff.readUInt8(buffI); buffI++;
+			
+			rep = this._decodeUInt(buff, buffI, reject);
+			if(rep === -1) return;
+			
+			buffI += rep.bytes;
+			retBuffLength += (rep.number + 1);
+		};
+		
+		return retBuffLength;
+	};
+	
+	_decodeRLE(buff, reject) {
+		const retBuffLen = this._getLengthRLE(buff, reject);
+		if(retBuffLen === -1) return;
+		
+		const retBuff = Buffer.alloc(retBuffLen);
+		
+		let buffI = 0, retBuffI = 0, c = 0x00, rep = false, j = 0;
+		for(; buffI < buff.length;) {
+			c = buff.readUInt8(buffI); buffI++;
+			
+			rep = this._decodeUInt(buff, buffI, reject);
+			if(rep === -1) return;
+			
+			buffI += rep.bytes;
+			
+			for(j = 0; j < (rep.number + 1); j++) {
+				retBuff.writeUInt8(c, retBuffI);
+				retBuffI++;
+			};
+		};
+		
+		return retBuff;
 	};
 	
 	// `decode` expects a Buffer, and maybe a number.
