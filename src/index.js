@@ -24,25 +24,7 @@ class ComprezzEncoder {
 	};
 	
 	_encodeBWT(buff, reject) {
-		const rotations = [];
-		
-		for(let i = 0; i < buff.length; i++)
-			rotations.push(Buffer.concat([
-				buff.slice(i),
-				buff.slice(0, i),
-			]));
-		
-		rotations.sort((x, y) => Buffer.compare(x, y));
-		
-		const rIndex = rotations.findIndex(x => x.equals(buff));
-		const retBuff = Buffer.alloc(buff.length + 4);
-		
-		for(let i = 0; i < buff.length; i++)
-			retBuff.writeUInt8(rotations[i].readUInt8(buff.length - 1), i);
-		
-		retBuff.writeUInt32BE(rIndex, buff.length);
-		
-		return retBuff;
+		// [TODO]
 	};
 	
 	_encodeUInt(num) {
@@ -210,6 +192,10 @@ class ComprezzDecoder {
 		return ret;
 	};
 	
+	_decodeBWT(buff, reject) {
+		// [TODO]
+	};
+	
 	_decodeUInt(buff, buffI, reject) {
 		const no = new Uint32Array([ 0x00000000 ]);
 		
@@ -279,7 +265,9 @@ class ComprezzDecoder {
 		return buff;
 	};
 	
-	
+	_decodeLZSS(buff, reject) {
+		// [TODO]
+	};
 	
 	// `decode` expects a Buffer, and maybe a number.
 	decode(data, sizeLimit = false) {
