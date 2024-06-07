@@ -1,5 +1,31 @@
 "use strict";
 
+function comprezzGenDict() {
+	const dict = Buffer.alloc(0x1000);
+	let j = 0;
+	
+	for(let i = 0; i < 0x100; i++)
+		dict.writeUInt8(i, j + i);
+	
+	j += 0x100;
+	for(let i = 0; i < 0x100; i++)
+		dict.writeUInt8(0xff - i, j + i);
+	
+	j += 0x100;
+	for(let i = 0; i < 0x400; i++)
+		dict.writeUInt8(0x00, j + i);
+	
+	j += 0x400;
+	for(let i = 0; i < 0x400; i++)
+		dict.writeUInt8(0xff, j + i);
+	
+	j += 0x400;
+	for(let i = 0; i < 0x400; i++)
+		dict.writeUInt8(0x01, j + i);
+	
+	return dict;
+};
+
 class ComprezzEncoder {
 	constructor() {};
 	
@@ -101,55 +127,29 @@ class ComprezzEncoder {
 		return topMatch;
 	};
 	
-	_encodeLZSS(buff, reject) {
-		const	retBuff = Buffer.alloc(buff.length << 2),
-				dict = Buffer.alloc(0x1000),
-				refBuff = Buffer.alloc(3);
+	_getLengthLZSS(buff, reject) {
+		const dict = comprezzGenDict();
 		
-		let	buffI = 0, retBuffI = 0,
-			prefixByte = 0x00, prefixI = 0, oldBuffI = 0,
-			dictI = 0x000, match = false, isRef = false;
+		let buffI = 0, prefixBit = 0, isRef = false, match = false;
 		
 		while(buffI < buff.length) {
-			prefixByte = 0x00;
-			
-			oldBuffI = buffI;
 			buffI++;
 			
-			for(prefixI = 0; prefixI < 8; prefixI++) {
-				if(buffI >= buff.length) break;
-				
+			for(prefixBit = 0; prefixBit < 8; prefixBit++) {
 				match = this._lzssFindBiggestMatch(buff, buffI, dict);
 				
-				if(match.length > 3) {
-					prefixByte |= (0x80 >> prefixI);
-					
-					retBuff.writeUInt8(match.offset >> 4, retBuffI);
-					retBuffI++;
-					
-					retBuff.writeUInt8(	((match.offset << 4) |
-										(match.length >> 8)),
-										retBuffI);
-					retBuffI++;
-					
-					retBuff.writeUInt8(match.length, retBuffI);
-					retBuffI++;
-					
-					buffI += match.length;
-				} else {
-					dict.writeUInt8(buff.readUInt8(buffI), dictI);
-					retBuff.writeUInt8(buff.readUInt8(buffI), retBuffI);
-					
-					buffI++;
-					retBuffI++;
-					dictI = ((dictI + 1) & 0xfff);
-				}
+				buffI += ((match.length > 3) ? 3 : 1);
 			};
-			
-			retBuff.writeUInt8(prefixByte, oldBuffI);
 		};
 		
-		return retBuff.slice(0, retBuffI);
+		return retBuffLen;
+	};
+	
+	_encodeLZSS(buff, reject) {
+		const	dict = comprezzGenDict(),
+				retBuff = Buffer.alloc(buff.length << 2);
+		
+		
 	};
 	
 	// `encode` expects a Buffer.
@@ -265,8 +265,92 @@ class ComprezzDecoder {
 		return buff;
 	};
 	
+	_getLengthLZSS(buff, reject) {
+		let retBuffLen = 0;
+		
+		let	buffI = 0, prefixByte = 0x00, prefixI = 0,
+			isRef = false, refLen = 0;
+		
+		while(buffI < buff.length) {
+			prefixByte = buff.readUInt8(buffI);
+			buffI++;
+			
+			for(prefixI = 0; prefixI < 8; prefixI++) {
+				isRef = ((0x80 >> prefixI) & prefixByte);
+				
+				if(isRef) {
+					refLen = 0;
+					
+					refLen = (buff.readUInt16BE(buffI + 1) & 0xfff);
+					buffI += 3;
+					
+					retBuffLen += refLen;
+					
+					continue;
+				}
+				
+				buffI++;
+				retBuffLen++;
+			};
+		};
+		
+		return retBuffLen;
+	};
+	
 	_decodeLZSS(buff, reject) {
-		// [TODO]
+		const retBuffLen = this._getLengthLZSS(buff, reject);
+		if(retBuffLen === -1) return -1;
+		
+		const dict = comprezzGenDict();
+		const retBuff = Buffer.alloc(retBuffLen);
+		
+		let	buffI = 0, retBuffI = 0, c = 0x00,
+			prefixByte = 0x00, prefixI = 0,
+			isRef = false, refWord = 0x0000, refOff = 0x000, refLen = 0x000,
+			dictI = 0x000, dictJ = 0x000,
+			dictSlice = false;
+		
+		while((buffI < buff.length) && (retBuffI < retBuffLen)) {
+			prefixByte = buff.readUInt8(buffI);
+			buffI++;
+			
+			for(prefixI = 0; prefixI < 8; prefixI++) {
+				if(buffI >= buff.length) break;
+				
+				isRef = (prefixByte & (0x80 >> prefixI));
+				
+				if(isRef) {
+					refOff = (buff.readUInt16BE(buff) >> 4);
+					refLen = (buff.readUInt16BE(buffI + 1) & 0xfff);
+					
+					buffI += 3;
+					
+					dictSlice = this._getDictSliceLZSS(dict, refOff, refLen);
+					
+					for(dictJ = 0x000; dictJ < refLen; dictJ++) {
+						dict.writeUInt8(dictSlice.readUInt8(),
+										(dictI + dictJ) & 0xfff);
+					};
+					
+					dictI = ((dictI + refLen) & 0xfff);
+					
+					retBuffI += dictSlice.copy(retBuff, retBuffI);
+					
+					continue;
+				}
+				
+				c = buff.readUInt8(buffI);
+				buffI++;
+				
+				retBuff.writeUInt8(c, retBuffI);
+				retBuffI++;
+				
+				dict.writeUInt8(c, dictI);
+				dictI = ((dictI + 1) & 0xfff);
+			};
+		};
+		
+		return retBuff.slice(0, retBuffI);
 	};
 	
 	// `decode` expects a Buffer, and maybe a number.
