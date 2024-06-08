@@ -1,6 +1,6 @@
 "use strict";
 
-function comprezzGenDict() {
+function comprezzGenLZSSDict() {
 	const dict = Buffer.alloc(0x1000);
 	let j = 0;
 	
@@ -145,7 +145,7 @@ class ComprezzEncoder {
 	};
 	
 	_getLengthLZSS(buff, reject) {
-		const dict = comprezzGenDict();
+		const dict = comprezzGenLZSSDict();
 		
 		let	buffI = 0, retBuffLen = 0,
 			prefixBit = 0, isRef = false, match = false;
@@ -177,8 +177,8 @@ class ComprezzEncoder {
 		const retBuffLen = this._getLengthLZSS(buff, reject);
 		if(retBuffLen === -1) return -1;
 		
-		const dict = comprezzGenDict();
-		const retBuff = Buffer.alloc(retBuffLen + 1);
+		const dict = comprezzGenLZSSDict();
+		const retBuff = Buffer.alloc(retBuffLen);
 		
 		let	buffI = 0, retBuffI = 0, oldRetBuffI = 0,
 			prefixByte = 0x00, prefixBit = 0, isRef = false, match = false;
@@ -199,15 +199,15 @@ class ComprezzEncoder {
 					this._lzssPushToDict(dict, match.match);
 					this.buffI += match.length;
 					
-					retBuff.writeUInt8((match.offset >> 4), retBuffI);
+					retBuff.writeUInt8(((match.offset >> 4) & 0xff), retBuffI);
 					
-					retBuff.writeUInt8(	((match.offset << 4) |
-										(match.length >> 8)), retBuffI + 1);
+					retBuff.writeUInt8(	(((match.offset << 4) |
+										(match.length >> 8))) &
+										0xff, retBuffI + 1);
 					
-					retBuff.writeUInt8((match.length), retBuffI + 2);
+					retBuff.writeUInt8(((match.length) & 0xff), retBuffI + 2);
 					
 					buffI += match.length;
-					
 					retBuffI += 3;
 					prefixByte |= (0x80 >> prefixBit);
 				} else {
@@ -330,12 +330,12 @@ class ComprezzDecoder {
 	};
 	
 	_getDictSliceLZSS(dict, off, len) {
-		const buff = Buffer.alloc(Math.min(0x1000, len));
+		const retBuff = Buffer.alloc((len > 0x1000) ? 0x1000 : len);
 		
 		for(let i = 0; i < len; i++)
-			buff.writeUInt8(i, dict.readUInt8((off + i) & 0xfff));
+			retBuff.writeUInt8(dict.readUInt8((off + i) & 0xfff), i);
 		
-		return buff;
+		return retBuff;
 	};
 	
 	_getLengthLZSS(buff, reject) {
@@ -374,7 +374,7 @@ class ComprezzDecoder {
 		const retBuffLen = this._getLengthLZSS(buff, reject);
 		if(retBuffLen === -1) return -1;
 		
-		const dict = comprezzGenDict();
+		const dict = comprezzGenLZSSDict();
 		const retBuff = Buffer.alloc(retBuffLen);
 		
 		let	buffI = 0, retBuffI = 0, c = 0x00,
