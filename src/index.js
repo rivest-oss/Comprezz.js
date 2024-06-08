@@ -94,11 +94,13 @@ class ComprezzEncoder {
 	};
 	
 	_lzssFindMatch(buff, buffI, dict, dictOffI) {
-		let len = 0, i = buffI, j = dictOffI;
+		let len = 0, i = 0, j = dictOffI;
 		
-		while((i < buff.length) && (len < 0x1000)) {
-			if(buff.readUInt8(i) !== dict.readUInt8(j)) break;
+		while(((buffI + i) < buff.length) && (len < 0xffff)) {
+			if(buff.readUInt8(buffI + i) !== dict.readUInt8(j))
+				break;
 			
+			len++;
 			i++;
 			j = ((j + 1) & 0xfff);
 		};
@@ -118,7 +120,7 @@ class ComprezzEncoder {
 			 
 			 if(topMatch === false) {
 			 	topMatch = currMatch;
-			 	break;
+			 	continue;
 			 }
 			 
 			 if(currMatch.length > topMatch.length) topMatch = currMatch;
@@ -127,18 +129,44 @@ class ComprezzEncoder {
 		return topMatch;
 	};
 	
+	_lzssPushToDict(dict, bytes) {
+		if(Buffer.isBuffer(bytes)) {
+			for(let i = 0; i < bytes.length; i++)
+				this._lzssPushToDict(dict, bytes.readUInt8(i));
+			
+			return;
+		}
+		
+		if(dict.dictI === undefined) dict.dictI = 0;
+		
+		dict.writeUInt8(bytes, dict.dictI);
+		
+		dict.dictI = ((dict.dictI + 1) & 0xfff);
+	};
+	
 	_getLengthLZSS(buff, reject) {
 		const dict = comprezzGenDict();
 		
-		let buffI = 0, prefixBit = 0, isRef = false, match = false;
+		let	buffI = 0, retBuffLen = 0,
+			prefixBit = 0, isRef = false, match = false;
 		
 		while(buffI < buff.length) {
-			buffI++;
+			retBuffLen++;
 			
 			for(prefixBit = 0; prefixBit < 8; prefixBit++) {
+				if(buffI >= buff.length) break;
+				
 				match = this._lzssFindBiggestMatch(buff, buffI, dict);
 				
-				buffI += ((match.length > 3) ? 3 : 1);
+				if(match.length > 3) {
+					this._lzssPushToDict(dict, match.match);
+					buffI += match.length;
+					retBuffLen += 3;
+				} else {
+					this._lzssPushToDict(dict, buff.readUInt8(buffI));
+					buffI++;
+					retBuffLen++;
+				}
 			};
 		};
 		
@@ -146,10 +174,53 @@ class ComprezzEncoder {
 	};
 	
 	_encodeLZSS(buff, reject) {
-		const	dict = comprezzGenDict(),
-				retBuff = Buffer.alloc(buff.length << 2);
+		const retBuffLen = this._getLengthLZSS(buff, reject);
+		if(retBuffLen === -1) return -1;
 		
+		const dict = comprezzGenDict();
+		const retBuff = Buffer.alloc(retBuffLen);
 		
+		let	buffI = 0, retBuffI = 0, oldRetBuffI = 0,
+			prefixByte = 0x00, prefixBit = 0, isRef = false, match = false;
+		
+		while((buffI < buff.length) && (retBuffI < retBuffLen)) {
+			prefixByte = 0x00;
+			oldRetBuffI = (retBuffI | 0);
+			retBuffI++;
+			
+			for(prefixBit = 0; prefixBit < 8; prefixBit++) {
+				if(buffI >= buff.length) break;
+				if(retBuffI >= retBuffLen) break;
+				
+				match = this._lzssFindBiggestMatch(buff, buffI, dict);
+				isRef = (match.length > 3);
+				
+				if(isRef) {
+					this._lzssPushToDict(dict, match.match);
+					this.buffI += match.length;
+					
+					retBuff.writeUInt8((match.offset >> 4), retBuffI);
+					
+					retBuff.writeUInt8(	((match.offset << 4) |
+										(match.length >> 8)), retBuffI + 1);
+					
+					retBuff.writeUInt8((match.length), retBuffI + 3);
+					
+					retBuffI += 3;
+					prefixByte |= (0x80 >> prefixBit);
+				} else {
+					this._lzssPushToDict(dict, buff.readUInt8(buffI));
+					retBuff.writeUInt8(buff.readUInt8(buffI), retBuffI);
+					
+					buffI++;
+					retBuffI++;
+				}
+			};
+			
+			retBuff.writeUInt8(prefixByte, oldRetBuffI);
+		};
+		
+		return retBuff;
 	};
 	
 	// `encode` expects a Buffer.
