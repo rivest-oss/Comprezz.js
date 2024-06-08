@@ -178,7 +178,7 @@ class ComprezzEncoder {
 		if(retBuffLen === -1) return -1;
 		
 		const dict = comprezzGenDict();
-		const retBuff = Buffer.alloc(retBuffLen);
+		const retBuff = Buffer.alloc(retBuffLen + 1);
 		
 		let	buffI = 0, retBuffI = 0, oldRetBuffI = 0,
 			prefixByte = 0x00, prefixBit = 0, isRef = false, match = false;
@@ -204,7 +204,9 @@ class ComprezzEncoder {
 					retBuff.writeUInt8(	((match.offset << 4) |
 										(match.length >> 8)), retBuffI + 1);
 					
-					retBuff.writeUInt8((match.length), retBuffI + 3);
+					retBuff.writeUInt8((match.length), retBuffI + 2);
+					
+					buffI += match.length;
 					
 					retBuffI += 3;
 					prefixByte |= (0x80 >> prefixBit);
@@ -391,7 +393,7 @@ class ComprezzDecoder {
 				isRef = (prefixByte & (0x80 >> prefixI));
 				
 				if(isRef) {
-					refOff = (buff.readUInt16BE(buff) >> 4);
+					refOff = (buff.readUInt16BE(buffI) >> 4);
 					refLen = (buff.readUInt16BE(buffI + 1) & 0xfff);
 					
 					buffI += 3;
