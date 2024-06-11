@@ -70,27 +70,108 @@ class ComprezzEncoder {
 		return buff.slice(0, i + 1);
 	};
 	
-	_encodeRLE(buff, reject) {
-		const ret = Buffer.alloc((buff.length << 2) + buff.length);
+	_getLengthRLE(buff, reject) {
+		let	buffI = 0, retBuffI = 0,
+			prefixBit = 0,
+			c = 0x00, repN = 0, repBuff = false;
 		
-		let	si = 0, sc0 = 0x00, sc1 = 0x00,
-			repNo = 0, repBuff,
-			di = 0;
-		
-		for(; si < buff.length;) {
-			sc0 = buff.readUInt8(si);
+		while(buffI < buff.length) {
+			retBuffI++;
 			
-			for(repNo = 0; si < buff.length; si++, repNo++) {
-				sc1 = buff.readUInt8(si);
-				if(sc0 !== sc1) break;
+			for(prefixBit = 0; prefixBit < 8; prefixBit++) {
+				if(buffI >= buff.length) break;
+				
+				c = buff.readUInt8(buffI);
+				retBuffI++;
+				
+				repN = 0;
+				
+				while((buffI + repN) < buff.length) {
+					if(c !== buff.readUInt8(buffI + repN)) break;
+					repN++;
+				};
+				
+				if(repN > 1) {
+					repBuff = this._encodeUInt(repN);
+					retBuffI += repBuff.length;
+				}
+				
+				buffI += repN;
 			};
-			
-			ret.writeUInt8(sc0, di); di++;
-			repBuff = this._encodeUInt(repNo - 1);
-			di += repBuff.copy(ret, di);
 		};
 		
-		return ret.slice(0, di);
+		return retBuffI;
+	};
+	
+	_encodeRLE(buff, reject) {
+		const retBuffLen = this._getLengthRLE(buff, reject);
+		if(retBuffLen === -1) return -1;
+		
+		const retBuff = Buffer.alloc(retBuffLen);
+		
+		let	buffI = 0, retBuffI = 0, oldRetBuffI = 0,
+			prefixByte = 0x00, prefixBit = 0,
+			c = 0x00, repN = 0, repBuff = false;
+		
+		while(buffI < buff.length) {
+			oldRetBuffI = (retBuffI | 0);
+			retBuffI++;
+			
+			prefixByte = 0x00;
+			
+			for(prefixBit = 0; prefixBit < 8; prefixBit++) {
+				if(buffI >= buff.length) break;
+				
+				c = buff.readUInt8(buffI);
+				
+				retBuff.writeUInt8(c, retBuffI);
+				retBuffI++;
+				
+				repN = 0;
+				
+				while((buffI + repN) < buff.length) {
+					if(c !== buff.readUInt8(buffI + repN)) break;
+					repN++;
+				};
+				
+				if(repN > 2) {
+					repBuff = this._encodeUInt(repN);
+					retBuffI += repBuff.copy(retBuff, retBuffI);
+					
+					prefixByte |= (0x80 >> prefixBit);
+				}
+				
+				buffI += repN;
+			};
+			
+			retBuff.writeUInt8(prefixByte, oldRetBuffI);
+		};
+		
+		return retBuff;
+	};
+	
+	_getLengthDelta(buff, reject) {
+		// [TODO]
+	};
+	
+	_encodeDelta(buff, reject) {
+		const retBuffLen = this._getLengthDelta(buff, reject);
+		if(retBuffLen === -1) return -1;
+		
+		const retBuff = Buffer.alloc(retBuffLen);
+		
+		let	buffI = 0, retBuffI = 0, oldRetBuffI = 0,
+			prefixByte = 0x00, prefixBit = 0, is = false, repN = 0, c = 0;
+		
+		for(buffI = 0; buffI < buff.length;) {
+			retBuffI = (oldRetBuffI | 0);
+			retBuffI++;
+			
+			
+			retBuff.writeUInt8();
+		};
+		
+		return retBuff;
 	};
 	
 	_lzssFindMatch(buff, buffI, dict, dictOffI) {
@@ -290,19 +371,37 @@ class ComprezzDecoder {
 	};
 	
 	_getLengthRLE(buff, reject) {
-		let retBuffLength = 0;
+		let	buffI = 0, retBuffI = 0,
+			prefixByte = 0x00, prefixBit = 0,
+			c = 0x00, isRep = 0, rep = false, repN = 0;
 		
-		for(let buffI = 0, c = 0x00, rep = false; buffI < buff.length;) {
-			c = buff.readUInt8(buffI); buffI++;
+		while(buffI < buff.length) {
+			prefixByte = buff.readUInt8(buffI);
+			buffI++;
 			
-			rep = this._decodeUInt(buff, buffI, reject);
-			if(rep === -1) return;
-			
-			buffI += rep.bytes;
-			retBuffLength += (rep.number + 1);
+			for(prefixBit = 0; prefixBit < 8; prefixBit++) {
+				if(buffI >= buff.length) break;
+				
+				isRep = ((0x80 >> prefixBit) & prefixByte);
+				
+				c = buff.readUInt8(buffI);
+				buffI++;
+				
+				if(isRep) {
+					rep = this._decodeUInt(buff, buffI);
+					
+					for(repN = 0; repN < rep.number; repN++, retBuffI++);
+					
+					buffI += rep.bytes;
+					
+					continue;
+				}
+				
+				retBuffI++;
+			};
 		};
 		
-		return retBuffLength;
+		return retBuffI;
 	};
 	
 	_decodeRLE(buff, reject) {
@@ -311,16 +410,33 @@ class ComprezzDecoder {
 		
 		const retBuff = Buffer.alloc(retBuffLen);
 		
-		let buffI = 0, retBuffI = 0, c = 0x00, rep = false, j = 0;
-		for(; buffI < buff.length;) {
-			c = buff.readUInt8(buffI); buffI++;
+		let	buffI = 0, retBuffI = 0,
+			prefixByte = 0x00, prefixBit = 0,
+			c = 0x00, isRep = 0, rep = false, repN = 0;
+		
+		while((buffI < buff.length) && (retBuffI < retBuffLen)) {
+			prefixByte = buff.readUInt8(buffI);
+			buffI++;
 			
-			rep = this._decodeUInt(buff, buffI, reject);
-			if(rep === -1) return;
-			
-			buffI += rep.bytes;
-			
-			for(j = 0; j < (rep.number + 1); j++) {
+			for(prefixBit = 0; prefixBit < 8; prefixBit++) {
+				if(buffI >= buff.length) break;
+				
+				isRep = ((0x80 >> prefixBit) & prefixByte);
+				
+				c = buff.readUInt8(buffI);
+				buffI++;
+				
+				if(isRep) {
+					rep = this._decodeUInt(buff, buffI);
+					
+					for(repN = 0; repN < rep.number; repN++, retBuffI++)
+						retBuff.writeUInt8(c, retBuffI);
+					
+					buffI += rep.bytes;
+					
+					continue;
+				}
+				
 				retBuff.writeUInt8(c, retBuffI);
 				retBuffI++;
 			};
