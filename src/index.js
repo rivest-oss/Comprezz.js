@@ -150,25 +150,13 @@ class ComprezzEncoder {
 		return retBuff;
 	};
 	
-	_getLengthDelta(buff, reject) {
-		// [TODO]
-	};
-	
 	_encodeDelta(buff, reject) {
-		const retBuffLen = this._getLengthDelta(buff, reject);
-		if(retBuffLen === -1) return -1;
+		const retBuff = Buffer.alloc(buff.length);
 		
-		const retBuff = Buffer.alloc(retBuffLen);
-		
-		let	buffI = 0, retBuffI = 0, oldRetBuffI = 0,
-			prefixByte = 0x00, prefixBit = 0, is = false, repN = 0, c = 0;
-		
-		for(buffI = 0; buffI < buff.length;) {
-			retBuffI = (oldRetBuffI | 0);
-			retBuffI++;
-			
-			
-			retBuff.writeUInt8();
+		for(let i = 0, b0 = 0xa5, b1 = 0x00; i < buff.length; i++) {
+			b1 = buff.readUInt8(i);
+			retBuff.writeInt8(b1 - b0, i);
+			b0 = b1;
 		};
 		
 		return retBuff;
@@ -440,6 +428,18 @@ class ComprezzDecoder {
 				retBuff.writeUInt8(c, retBuffI);
 				retBuffI++;
 			};
+		};
+		
+		return retBuff;
+	};
+	
+	_decodeDelta(buff, reject) {
+		const retBuff = Buffer.alloc(buff.length);
+		
+		for(let i = 0, orig = 0xa5, delta = 0x00; i < buff.length; i++) {
+			delta = buff.readInt8(i);
+			retBuff.writeUInt8(orig + delta, i);
+			orig = retBuff.readUint8(i);
 		};
 		
 		return retBuff;
